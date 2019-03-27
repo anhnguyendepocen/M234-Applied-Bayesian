@@ -1,0 +1,352 @@
+---
+title: "Final Project: Sleep Quality"
+author: "Huiyu (Joyce)"
+date: "3/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Read in & Explore data
+
+```{r}
+#LOAD NECESSARY PACKAGES
+library(R2jags)
+library(lattice)
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(plyr)
+library(lme4)
+library(reshape2)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(lattice)
+
+# useful function
+mysummary = function(invector) {
+c(mean(invector), sd(invector), quantile(invector, .025),
+quantile(invector,.975),
+length(invector[invector>0])/length(invector))
+}
+#Load dataset 
+setwd("/Users/huiyuhu/Desktop/Study/UCLA_Biostat/BIOSTAT234/FinalProject")
+sleep.data <- read.csv(file="sleepdata.csv", header=TRUE, sep=",")
+head(sleep.data)
+load("AddBurnin.RData")
+```
+
+##### Statistic Summary 
+
+```{r}
+#overall
+dim(sleep.data) ## How many observations and variables in this study?
+length(unique(sleep.data$Id)) ## How many subjects?
+summary(sleep.data$quality)
+sd(sleep.data$quality)
+summary(sleep.data$quality)
+
+sd(sleep.data$act)
+summary(sleep.data$act)
+
+sd(sleep.data$inbed)
+summary(sleep.data$inbed)
+
+#Remove outlier 
+sleep.data <- sleep.data %>% filter(obs != 39)
+
+sleep2 <- sleep.data %>% filter(Id == 2)
+
+mean(sleep2$quality)
+sd(sleep2$quality)
+
+mean(sleep2$act)
+sd(sleep2$act)
+
+mean(sleep2$inbed)
+sd(sleep2$inbed)
+
+sum(sleep2$before12)
+  
+# by subject 
+summary <- sleep.data %>% 
+  group_by(factor(Id)) %>%
+  summarise(mean(quality), sd(quality), mean(heartrate), sd(heartrate), 
+            mean(act), sd(act), mean(inbed), sd(inbed), sum(offday), sum(before12))
+
+print(summary)
+
+
+# Histogram 
+# Find the mean of each group
+
+cdat <- ddply(sleep.data, "Id", summarise, sleep.mean=mean(quality))
+p0 <- ggplot(sleep.data, aes(x = quality, fill = factor(Id))) +
+  geom_density(alpha = .3) + #alpha used for filling the density
+  geom_vline(data = cdat, aes(xintercept = sleep.mean, colour = factor(Id)),
+             linetype = "longdash", size=1)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p0
+
+# Boxplot1 - factor(offday)
+p1 <- ggplot(sleep.data, aes(x=factor(offday), y=quality, fill=factor(offday))) +
+  geom_boxplot() + scale_fill_manual(values=c("#999999", "#E69F00", "#56B4E9")) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p1
+
+# Boxplot2 - factor(work)
+p2 <- ggplot(sleep.data, aes(x=factor(before12), y=quality, fill=factor(before12))) +
+  geom_boxplot() +scale_fill_brewer(palette = "Set1") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p2 
+
+# Scatterplot1 - activity
+p3 <- ggplot(data = sleep.data, aes(x = act, y = quality))+
+  geom_point(aes(color=factor(Id)))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+  
+  xlab("Activity Record")+ylab("Sleep Quality")
+p3
+
+# Scatterplot2 - inbed
+p4 <- ggplot(data = sleep.data, aes(x = inbed, y = quality))+
+  geom_point(aes(color=factor(Id)))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+  
+  xlab("In-Bed Time")+ylab("Sleep Quality")
+p4
+
+grid.arrange(
+  p0,
+  p1,
+  p2,
+  p3,
+  p4,
+  nrow = 3,
+  top = "Sleep Quality Data Visualization"
+)
+```
+
+#### Find Prior - According to sample to find the prior
+
+```{r}
+### Read in sample data
+sample <- read.csv(file="PriorSample.csv", header=TRUE, sep=",")
+y = sample$quality
+idnum = sample$Id
+act = sample$act
+inbed = sample$inbed
+off = sample$offday
+bf12 = sample$before12
+# fit model
+lr <- lmer(y ~ act + inbed + off + bf12 + (1|as.factor(idnum)))
+summary(lr)
+VarCorr(lr)
+```
+
+
+
+```{r}
+sink("model.txt")
+cat("
+model{
+for(i in 1:N) {
+	y[i] ~ dnorm( mu[i], tau.e)
+	mu[i] <- inprod(x[i,],alpha[]) + beta[idnum[i]]
+}
+
+for(j in 1:J) {
+	alpha[j] ~ dnorm( m[j], prec[j] )
+}
+
+for(k in 1:K) {
+	beta[k] ~ dnorm(0, tau.b)
+	}
+tau.b ~ dgamma(a1,b1)
+tau.e  ~ dgamma(a2,b2)
+
+sigma <- 1/sqrt(tau.e)
+d     <- 1/sqrt(tau.b)
+}
+
+    ",fill = TRUE)
+sink()
+```
+
+```{r}
+#### data preparation ####
+y = sleep.data$quality
+idnum = sleep.data$Id
+act = sleep.data$act
+inbed = sleep.data$inbed
+off = sleep.data$offday
+bf12 = sleep.data$before12
+# hw = hist*work
+x = matrix(data=c(rep(1,99), act, inbed, off, bf12), byrow=F, ncol=5)
+
+#Prior A
+m1 = c(45.19, 0.010, 4.12, 1.248, 0.807)
+prec1 = c(.0123, 15600, .602, .289, .266)
+
+#Prior B
+prec2 = c(.00154, 1950, .0753, .0361, .0333)
+
+#Prior C
+prec3 = c(.000384, 478, .0188, .000903, .00833)
+
+```
+### Prior A
+```{r}
+# Prior A
+data1 = list(y = y,idnum = idnum, x = x, N = 99, J = 5, K = 2, 
+              a1 = 11, b1 = 168, a2 = 13, b2 = 325, 
+              m = m1, prec = prec1)
+
+inits = rep(list(list( alpha = c(45., 1, 1, 1, 1), beta=as.vector(rnorm(2)), tau.b = 1, tau.e = 1)), 5)
+parameters = c("alpha", "beta", "tau.e", "tau.b", "sigma", "d")
+
+run1 = jags(data = data1, inits = inits, parameters.to.save = parameters, "model.txt", 
+	n.chains=5, n.iter=11000, n.burnin=0, n.thin=1)
+Output1=AddBurnin(run1$BUGSoutput$sims.array,burnin=1000,n.thin=1)
+```
+### Prior B
+```{r}
+bpdata2 = list(y = y, 
+              idnum = idnum, 
+              x = x, 
+              N = 99, 
+              J = 5, 
+              K = 2, 
+              a1 = 1.375, 
+              b1 = 21, 
+              a2 = 1.625, 
+              b2 = 40.625, 
+              m = m1, 
+              prec = prec2)
+
+bpinits = rep(list(list( alpha = c(45., 1, 1, 1, 1), beta=as.vector(rnorm(2)), tau.b = 1, tau.e = 1)), 5)
+bpparameters = c("alpha", "beta", "tau.e", "tau.b", "sigma", "d")
+
+run2 = jags(data = bpdata2, inits = bpinits, parameters.to.save = bpparameters, "model.txt", 
+	n.chains=5, n.iter=11000, n.burnin=0, n.thin=1)
+```
+
+### Prior C
+```{r}
+bpdata3 = list(y = y, 
+              idnum = idnum, 
+              x = x, 
+              N = 99, 
+              J = 5, 
+              K = 2, 
+              a1 = 0.344, 
+              b1 = 5.25, 
+              a2 = 0.406, 
+              b2 = 10.156, 
+              m = m1, 
+              prec = prec3)
+
+bpinits = rep(list(list( alpha = c(45., 1, 1, 1, 1), beta=as.vector(rnorm(2)), tau.b = 1, tau.e = 1)), 5)
+bpparameters = c("alpha", "beta", "tau.e", "tau.b", "sigma", "d")
+
+run3 = jags(data = bpdata3, inits = bpinits, parameters.to.save = bpparameters, "model.txt", 
+	n.chains=5, n.iter=11000, n.burnin=0, n.thin=1)
+```
+
+
+#### Plots Posterior
+
+```{r}
+temp3 = Output1$Burnin.sims.matrix
+par(mfrow=c(2,3))
+# Intercept
+plot(density(temp3[,1]),main="",xlab="alpha0 (Intercept)")
+lines(density(rnorm(100000,mean=45.19, sd=9)), lty=3,lwd=2, col="blue")
+legend("topleft", legend=c("post","prior"), col=c("black", "blue"), lty=1:2 , lwd=c(1,2))
+
+# activity 
+plot(density(temp3[,2]),main="",xlab="alpha1 (Activity)")
+lines(density(rnorm(100000,mean=0.010, sd=0.008)), lty=3,lwd=2, col="blue")
+legend("topleft", legend=c("post","prior"), col=c("black", "blue"), lty=1:2 , lwd=c(1,2))
+
+# In-Bed
+plot(density(temp3[,3]),main="",xlab="alpha2 (In-Bed)")
+lines(density(rnorm(100000,mean=4.097, sd=1.289)), lty=3,lwd=2, col="blue")
+legend("topleft", legend=c("post","prior"), col=c("black", "blue"), lty=1:2 , lwd=c(1,2))
+
+# Off-Day
+plot(density(temp3[,4]),main="",xlab="alpha3 (Off-Day)")
+lines(density(rnorm(100000,mean=1.248, sd=1.861)), lty=3,lwd=2, col="blue")
+legend("topleft", legend=c("post","prior"), col=c("black", "blue"), lty=1:2 , lwd=c(1,2))
+
+# Before 12
+plot(density(temp3[,5]),main="",xlab="alpha4 (Before 12am)")
+lines(density(rnorm(100000,mean=0.807, sd=1.940)), lty=3,lwd=2, col="blue")
+legend("topleft", legend=c("post","prior"), col=c("black", "blue"), lty=1:2 , lwd=c(1,2))
+```
+
+```{r}
+#Boxplots for Beta
+betas <- melt(Output1$Burnin.sims.matrix[,6:7])
+ggplot(betas, aes(x=Var2, y=value, fill=Var2)) +  # This is the plot function
+  geom_boxplot()  +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+```
+
+
+## Result analysis
+```{r}
+par(mfrow=c(2,3))
+acf(run1$BUGSoutput$sims.array[1001:11000,1,1], main="intercept", lag.max = 50)
+acf(run1$BUGSoutput$sims.array[1001:11000,1,2], main="Activity", lag.max = 50)
+acf(run1$BUGSoutput$sims.array[1001:11000,1,3], main="InBed", lag.max = 50)
+acf(run1$BUGSoutput$sims.array[1001:11000,1,4], main="Offday", lag.max = 50)
+acf(run1$BUGSoutput$sims.array[1001:11000,1,5], main="Before 12 A.M.", lag.max = 50)
+
+# trace plot 
+par(mfrow=c(2,3))
+plot(run1$BUGSoutput$sims.array[1001:11000,1,1], main="intercept", type="l",ylab = "")
+plot(run1$BUGSoutput$sims.array[1001:11000,1,2], main="Activity", type="l",ylab = "")
+plot(run1$BUGSoutput$sims.array[1001:11000,1,3], main="InBed", type="l",ylab = "")
+plot(run1$BUGSoutput$sims.array[1001:11000,1,4], main="Offday", type="l",ylab = "")
+plot(run1$BUGSoutput$sims.array[1001:11000,1,5],  main="Before 12 A.M.", type="l",ylab = "")
+
+
+
+```
+```{r}
+a <- matrix(0,nrow = 10,ncol = 5)
+alphas = Output1$Burnin.sims.matrix[,1:10]
+for (i in 1:10){
+  a[i,] <- round(mysummary(alphas[,i]), 3)
+}
+kable(a)
+```
+
+
+
+#### Classic Random Effect Model Result
+
+```{r}
+lr <- lmer(y~act + inbed + off + bf12 + (1|as.factor(idnum)))
+summary(lr)
+VarCorr(lr)
+```
+
+
+
+
+
+
+
+
+
+

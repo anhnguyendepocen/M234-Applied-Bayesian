@@ -1,0 +1,22 @@
+
+model{
+for(i in 1:N) {
+	y[i] ~ dnorm( mu[i], tau.e) 
+	mu[i] <- inprod(x[i,],alpha[]) + beta[idnum[i]]
+}
+
+for(j in 1:J) {
+	alpha[j] ~ dnorm( m[j], prec[j] )
+}
+
+for(k in 1:K) {
+	beta[k] ~ dnorm(0, tau.b)
+	}
+tau.b ~ dgamma(a1,b1) 
+tau.e  ~ dgamma(a2,b2)
+
+sigma <- 1/sqrt(tau.e)
+d     <- 1/sqrt(tau.b)
+}
+
+    

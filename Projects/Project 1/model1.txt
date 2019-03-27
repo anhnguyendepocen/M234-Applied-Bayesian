@@ -1,0 +1,20 @@
+
+    model{
+        for(i in 1:N){
+                ne[i] ~ dnorm(0,tau.b)
+        }
+        for(j in 1:C){
+                y[j] ~ dnorm(mu[j],tau.e)
+                mu[j] <- beta0+inprod(x[j,],beta[]) + ne[id[j]]
+        }
+        
+        beta0 ~ dnorm(120,30)
+        for(k in 1:2){
+                beta[k] ~ dnorm(0, 0.01)
+        }
+        tau.e ~ dgamma(1,1)
+        tau.b ~ dgamma(2,2)
+        sigma.e <- 1/sqrt(tau.e)
+        sigma.b <- 1/sqrt(tau.b)
+    }
+    

@@ -1,0 +1,293 @@
+---
+title: "Biostat234_Lab6"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Name: Huiyu Hu
+
+```{r}
+#LOAD NECESSARY PACKAGES
+setwd("/Users/huiyuhu/Desktop/Study/UCLA_Biostat/BIOSTAT234/lab/Lab 6")
+library(R2jags)
+load("AddBurnin.RData")
+library(lattice)
+library(mlbench)
+library(knitr)
+library(ggplot2)
+
+help(BostonHousing2) # note capital letters!
+data(BostonHousing2) # Allows us to access the data
+dim(BostonHousing2)
+head(BostonHousing2)
+splom(BostonHousing2[,6:12])
+splom(BostonHousing2[,13:19])
+
+y = as.vector(BostonHousing2$cmedv)
+x = BostonHousing2[,7:19]
+is.factor(BostonHousing2[,10])
+is.factor(x[,4])  
+x[,4] = as.numeric(levels(x[,4])[x[,4]])
+is.factor(x[,4])
+x = as.matrix(x)
+
+xsd = as.vector(apply(x, 2, sd))
+ysd = sd(y)
+
+xstd  = scale(x, center = TRUE, scale = TRUE)
+		# centering and scaling the x matrix.  
+		# subtracting off the variable mean and 
+		# dividing by the variable sd.  
+```
+```{r}
+# sink("housingmodel2.txt")
+# cat("
+#     model
+# {
+#   # Variable selection model
+#   for (j in 1 : K) {
+#   pprec[j]    <- ccc * K / yvar
+#   b[j]         ~ dnorm( 0 , pprec[j] )
+#   delta[j]     ~ dbern( pidelta )
+#   }
+#   
+#   for (i in 1:N) {
+#   y[i]   ~ dnorm( mu[i] , tau )
+#   mu[i] <- b0 + z[i,1]*delta[1] * b[1] + z[i,2]*delta[2] * b[2] +
+#   z[i,3]*delta[3] * b[3] + z[i,4]*delta[4] * b[4] + z[i,5]*delta[5] * b[5] +
+#   z[i,6]*delta[6] * b[6] + z[i,7]*delta[7] * b[7] + z[i,8]*delta[8] * b[8] +
+#   z[i,9]*delta[9] * b[9] + z[i,10]*delta[10] * b[10] + z[i,11]*delta[11] * b[11] +
+#   z[i,12]*delta[12] * b[12] + z[i,13]*delta[13] * b[13]
+#   }
+#   
+#   b0    ~  dnorm(mb0,precb0)
+#   tau   ~  dgamma(tau.a,tau.b)
+#   }
+#   
+#     ",fill = TRUE)
+# sink()
+```
+
+```{r}
+bostondata = list(N = 506, K = 13, ccc = 1, pidelta = .5, 
+			yvar=ysd*ysd, tau.a = 1, tau.b = .05, 
+			mb0 = 0, precb0 = .000001, z = xstd, y = y ) 
+
+# wiser to set N= 106 or smaller to test out code and confirm that it works.
+
+bostoninits = rep(list(list(b0=0, b=c(0,0,.5,0,0, 0,0,1,0,0, 0,.3,0), 
+			tau=1, delta=c(1,1,1,0,1, 1,1,1,0,1, 1,1,0))), 3)
+
+bostonparameters = c("b", "delta", "b0", "tau" )
+```
+```{r}
+run1 = jags(bostondata, bostoninits, bostonparameters, "housingmodel2.txt",
+	    n.chains=3, n.iter=11000, n.burnin=1000, n.thin=1, DIC=T) 
+proc.time()
+run1$BUGSoutput$DIC
+run1$BUGSoutput$mean$delta[5]
+sum(run1$BUGSoutput$mean$delta)
+Output1=AddBurnin(run1$BUGSoutput$sims.array, burnin=1000, n.thin=1)
+print(Output1$Burnin.Summary)
+```
+```{r}
+temp1 = Output1$Burnin.sims.matrix
+
+############
+## calculate the bdeltas
+############
+
+b      = temp1[,1:13]
+delta  = temp1[,15:27]
+bdelta = temp1[,1:13]*temp1[,15:27]
+b0     = temp1[,14]
+dim(bdelta)
+mean(delta)
+#head(delta)
+#head(bdelta)
+# 30000 samples from the posterior of all 13 b*delta's. 
+```
+```{r}
+##############
+# TODO:  Adapt the mysummary function to also calculate the 
+#        probability that the coefficient is equal to zero.  
+#        Call the new function 'mysummary2'.
+##############
+mysummary = function(invector) {
+c(mean(invector), sd(invector), quantile(invector, .025), 
+	quantile(invector,.975),
+	length(invector[invector>0])/length(invector))
+}
+
+mysummary2 = function(invector) {
+  c(mean(invector), sd(invector), quantile(invector, .025), 
+    quantile(invector,.975),
+    length(invector[invector>0])/length(invector), 
+    1-(length(invector[invector>0])+length(invector[invector<0]))/length(invector),
+    length(invector[invector<0])/length(invector))
+}
+
+
+```
+
+##### 1.	Give the posterior mean and sd of deltatotal and plot the posterior of deltatotal. Interpret deltatotal (one sentence).
+
+- Deltatotal: Number of predictors in the model. Based on posterior of deltatotal, there will be about 11 predictor in the model.
+
+```{r}
+totaldelta = rowSums(delta)
+totaldelta.table <- round(mysummary(totaldelta), 3)
+#colnames(table1) = c("mean", "sd", "2.5%", "97.5%", "p")
+#colnames(table1) = c("mean", "sd", " 2.50%", "97.5%", "P(>0|Y)")
+#table1 <- as.matrix(table1)
+#table1 <- table1[1:2,]
+#colnames(table1) = c("mean", "sd")
+name <- c("mean", "sd", " 2.50%", "97.5%", "P(>0|Y)")
+kable(cbind(name, totaldelta.table))
+
+totaldelta <- as.data.frame(totaldelta)
+ggplot(totaldelta, aes(x=totaldelta)) + 
+  geom_density() + labs(title="TotalDelta density curve",x="TotalDelta", y = "Density")
+```
+
+
+##### 2.	Regression output for all the parameters of interest. Here it might be a table for b0, bdelta and sigma (and deltatotal is of interest too, but you reported it already in #1). You need the posterior probabilities that the bdelta are negative, zero and positive as well as the usual means, sds and 95% CIs.  
+
+```{r}
+q2data <- cbind(b0, bdelta)
+regout = t(apply(q2data, 2, mysummary2))
+#rownames(regout) = colnames(x)
+colnames(regout) = c("mean", "sd", " 2.50%", "97.5%", "P(>0|Y)", "P(=0|Y)", "P(<0|Y)")
+##regout
+kable(round(regout,4))
+################
+#  TODO:  Include b0 and sigma in the table as well. Do we calculate
+#  the probability that these are equal to zero or negative?  
+################
+#regout.b0 = mysummary(b0)
+```
+
+
+##### 3.	Give results from your sensitivity analysis for pidelta. Give a summary paragraph and a table of the numerical results. 
+
+```{r}
+pidelta <- c(0.05, 0.25, 0.5, 0.75, 0.95)
+
+bostondata = list(N = 506, K = 13, ccc = 1, pidelta = .5, 
+			yvar=ysd*ysd, tau.a = 1, tau.b = .05, 
+			mb0 = 0, precb0 = .000001, z = xstd, y = y ) 
+
+DICresult.s1 <- c(0,0,0,0,0)
+delta.s1 <- matrix(NA, 13, 5)
+delta.se1 <- matrix(NA, 13, 5)
+totaldelta.s1 <- c(0,0,0,0,0)
+
+for (i in 1:5) {
+  p <- pidelta[i]
+  bostondata = list(N = 506, K = 13, ccc = 1, pidelta = p, 
+			yvar=ysd*ysd, tau.a = 1, tau.b = .05, 
+			mb0 = 0, precb0 = .000001, z = xstd, y = y )
+  
+  bostonparameters = c("b", "delta", "b0", "tau" )
+  run3 = jags(bostondata, bostoninits, bostonparameters, "housingmodel2.txt",
+	    n.chains=3, n.iter=11000, n.burnin=1000, n.thin=1, DIC=T)
+  DICresult.s1[i] <- run3$BUGSoutput$DIC
+  delta.s1[,i] <- run3$BUGSoutput$mean$delta
+  delta.se1[,i] <- run3$BUGSoutput$sd$delta
+  totaldelta.s1[i] <- sum(run3$BUGSoutput$mean$delta)
+}
+#DICresult.s1
+#delta5.s1
+#totaldelta.s1
+colnames(delta.s1) <- c("P=0.05","P=0.25","P=0.5","P=0.75","P=0.95")
+colnames(delta.se1) <- c("P=0.05","P=0.25","P=0.5","P=0.75","P=0.95")
+kable(delta.s1)
+kable(delta.se1)
+
+#library('xlsx')
+#write.table(delta.s1, "/Users/huiyuhu/Desktop/Study/UCLA_Biostat/BIOSTAT234/lab/Lab 6/s1mean.xlsx")
+#delta.se1 <- round(delta.se1, 4)
+#write.table(delta.se1, "/Users/huiyuhu/Desktop/Study/UCLA_Biostat/BIOSTAT234/lab/Lab 6/s1sd.txt", sep="\t")
+```
+```{r}
+#table2 <- rbind(DICresult.s1, delta5.s1, totaldelta.s1)
+#rownames(table2) <- c("DIC","delta[5]","totaldelta")
+#colnames(table2) <- c("P=0.05","P=0.25","P=0.5","P=0.75","P=0.95")
+#kable(table2)
+```
+
+- Higher pidelta, lower DIC value which means better model. When p > 0.5, delta[5] approches 1 and totaldelta larger than 11. 
+
+- Based on the table above, there is no big difference when pidelta > 0.5. 
+
+##### 4.	Repeat for the sensitivity analysis for ccc. 
+
+- The variable ccc controls the width of the prior standard deviations of coefficients.  Vary ccc (low, medium and high)
+
+```{r}
+ccc <- c(0.1, 1, 10)
+
+DICresult.s2 <- c(0,0,0)
+delta.s2 <- matrix(NA, 13, 3)
+delta.se2 <- matrix(NA, 13, 3)
+totaldelta.s2 <- c(0,0,0)
+
+
+
+for (i in 1:3) {
+  c1 <- ccc[i]
+  bostondata = list(N = 506, K = 13, ccc = c1, pidelta = 0.5, 
+			yvar=ysd*ysd, tau.a = 1, tau.b = .05, 
+			mb0 = 0, precb0 = .000001, z = xstd, y = y )
+  
+  bostonparameters = c("b", "delta", "b0", "tau" )
+  run4 = jags(bostondata, bostoninits, bostonparameters, "housingmodel2.txt",
+	    n.chains=3, n.iter=11000, n.burnin=1000, n.thin=1, DIC=T)
+  DICresult.s2[i] <- run4$BUGSoutput$DIC
+  delta.s2[,i] <- run4$BUGSoutput$mean$delta
+  delta.se2[,i] <- run4$BUGSoutput$sd$delta
+  totaldelta.s2[i] <- sum(run4$BUGSoutput$mean$delta)
+}
+#colnames(delta.s2) <- c("P=0.05","P=0.25","P=0.5","P=0.75","P=0.95")
+#colnames(delta.se2) <- c("P=0.05","P=0.25","P=0.5","P=0.75","P=0.95")
+delta.s2 <- round(delta.s2, 4)
+delta.se2 <- round(delta.se2, 4)
+kable(delta.s2)
+kable(delta.se2)
+
+write.table(delta.se2, "/Users/huiyuhu/Desktop/Study/UCLA_Biostat/BIOSTAT234/lab/Lab 6/se2.txt", sep="\t")
+
+```
+```{r}
+#table3 <- rbind(DICresult.s2, delta5.s2, totaldelta.s2)
+#table3 <- table3[,1:3]
+#rownames(table3) <- c("DIC","delta[5]","totaldelta")
+#colnames(table3) <- c("ccc = 0.1","ccc = 1","ccc = 10")
+#kable(table3)
+```
+
+
+##### 5.	Report (one very short paragraph and two appropriate tables) your conclusions regarding whether people will pay more for lower pollution or not. The sensitivity results are extremely relevant to your report – be sure to include the results from all of your sensitivity analyses. Also of interest is a list of the most probable models and whether the pollution variable is included in those models. This gets a little messy to report this for all the different priors, so only report this for the primary analysis.  
+
+
+
+Extra credit:
+6.	Is there an interaction between ccc and pidelta? How can you tell? Run the two way sensitivity analysis that varies both ccc and pidelta together. (Use a factorial design) and report your results for a key summary measure of the posterior.  
+
+
+
+
+
+
+
+
+
+
+
+
+
