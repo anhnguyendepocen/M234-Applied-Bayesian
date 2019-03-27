@@ -12,11 +12,11 @@
 7. Model Selection.
 
 ## Homework
-1. Homework1
+#### Homework1
 * Normal data with a normal prior
 * Count Data with a Gamma Prior
 
-2. Homework2
+#### Homework2
 * Cereal Data: Predict cost using a Bayesian analysis. 
 * Random effect model
 
